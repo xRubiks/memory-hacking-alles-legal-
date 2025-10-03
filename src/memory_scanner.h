@@ -66,6 +66,10 @@ public:
     // Write memory region
     bool writeMemory(uintptr_t address, const void* buffer, size_t size);
 
+    // String-specific scan functions
+    std::vector<MemoryMatch<std::string>> scanForString(const std::string& value);
+    std::vector<MemoryMatch<std::wstring>> scanForWideString(const std::wstring& value);
+
 private:
     HANDLE m_processHandle;
 

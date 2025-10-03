@@ -72,5 +72,78 @@ bool MemoryScanner::writeMemory(uintptr_t address, const void* buffer, size_t si
            && bytesWritten == size;
 }
 
-#endif
+std::vector<MemoryMatch<std::string>> MemoryScanner::scanForString(const std::string& value) {
+    std::vector<MemoryMatch<std::string>> matches;
+    auto regions = getReadableRegions();
 
+    for (const auto& region : regions) {
+        // Skip if region is too small
+        if (region.size < value.length()) continue;
+
+        // Allocate buffer for this region
+        std::vector<uint8_t> buffer(region.size);
+
+        if (readMemory(region.baseAddress, buffer.data(), region.size)) {
+            // Search for the string in the buffer
+            for (size_t i = 0; i <= region.size - value.length(); i++) {
+                bool found = true;
+                for (size_t j = 0; j < value.length(); j++) {
+                    if (buffer[i + j] != static_cast<uint8_t>(value[j])) {
+                        found = false;
+                        break;
+                    }
+                }
+
+                if (found) {
+                    MemoryMatch<std::string> match;
+                    match.address = region.baseAddress + i;
+                    match.value = value;
+                    matches.push_back(match);
+                }
+            }
+        }
+    }
+
+    return matches;
+}
+
+std::vector<MemoryMatch<std::wstring>> MemoryScanner::scanForWideString(const std::wstring& value) {
+    std::vector<MemoryMatch<std::wstring>> matches;
+    auto regions = getReadableRegions();
+
+    size_t byteLength = value.length() * sizeof(wchar_t);
+
+    for (const auto& region : regions) {
+        // Skip if region is too small
+        if (region.size < byteLength) continue;
+
+        // Allocate buffer for this region
+        std::vector<uint8_t> buffer(region.size);
+
+        if (readMemory(region.baseAddress, buffer.data(), region.size)) {
+            // Search for the wide string in the buffer
+            for (size_t i = 0; i <= region.size - byteLength; i++) {
+                bool found = true;
+                for (size_t j = 0; j < value.length(); j++) {
+                    wchar_t currentChar;
+                    std::memcpy(&currentChar, &buffer[i + j * sizeof(wchar_t)], sizeof(wchar_t));
+                    if (currentChar != value[j]) {
+                        found = false;
+                        break;
+                    }
+                }
+
+                if (found) {
+                    MemoryMatch<std::wstring> match;
+                    match.address = region.baseAddress + i;
+                    match.value = value;
+                    matches.push_back(match);
+                }
+            }
+        }
+    }
+
+    return matches;
+}
+
+#endif
