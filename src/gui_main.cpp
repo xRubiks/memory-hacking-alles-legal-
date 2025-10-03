@@ -77,6 +77,9 @@ void WriteValue();
 void ReadValue();
 void ResetScan();
 void UpdateStatusBar(const std::wstring& text);
+void UpdateInputLimitForAddress(uintptr_t address);
+void OnAddressInputChanged();
+void OnResultListItemSelected();
 
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow) {
     // Initialize common controls
@@ -101,9 +104,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     g_hMainWindow = CreateWindowExW(
         0,
         CLASS_NAME,
-        L"Memory Scanner",
+        L"Memory Scanner - Professional",
         WS_OVERLAPPEDWINDOW,
-        CW_USEDEFAULT, CW_USEDEFAULT, 1000, 700,
+        CW_USEDEFAULT, CW_USEDEFAULT, 1400, 850,
         nullptr,
         nullptr,
         hInstance,
@@ -136,8 +139,32 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
         case WM_CREATE:
             CreateControls(hwnd);
             PopulateProcessList();
-            UpdateStatusBar(L"Bereit");
+            UpdateStatusBar(L"Bereit - Memory Scanner Professional");
             return 0;
+
+        case WM_KEYDOWN:
+            // Handle keyboard shortcuts
+            if (GetKeyState(VK_CONTROL) & 0x8000) {
+                switch (wParam) {
+                    case 'A': // STRG+A - Select All in focused edit control
+                        {
+                            HWND focused = GetFocus();
+                            if (focused == g_hValueInput || focused == g_hNewValueInput || focused == g_hAddressInput) {
+                                SendMessage(focused, EM_SETSEL, 0, -1);
+                            }
+                        }
+                        return 0;
+                    case 'C': // STRG+C - Copy selection
+                        {
+                            HWND focused = GetFocus();
+                            if (focused == g_hValueInput || focused == g_hNewValueInput || focused == g_hAddressInput) {
+                                SendMessage(focused, WM_COPY, 0, 0);
+                            }
+                        }
+                        return 0;
+                }
+            }
+            break;
 
         case WM_COMMAND:
             switch (LOWORD(wParam)) {
@@ -168,8 +195,31 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                 case IDC_BTN_REFRESH:
                     PopulateProcessList();
                     break;
+                case IDC_ADDRESS_INPUT:
+                    if (HIWORD(wParam) == EN_CHANGE) {
+                        OnAddressInputChanged();
+                    }
+                    break;
+                case IDC_COMBO_TYPE:
+                    if (HIWORD(wParam) == CBN_SELCHANGE) {
+                        int typeIndex = (int)SendMessage(g_hTypeCombo, CB_GETCURSEL, 0, 0);
+                        g_currentScanType = static_cast<ScanValueType>(typeIndex);
+                        OnAddressInputChanged();
+                    }
+                    break;
             }
             return 0;
+
+        case WM_NOTIFY: {
+            LPNMHDR nmhdr = (LPNMHDR)lParam;
+            if (nmhdr->idFrom == IDC_RESULT_LIST && nmhdr->code == LVN_ITEMCHANGED) {
+                LPNMLISTVIEW pnmv = (LPNMLISTVIEW)lParam;
+                if (pnmv->uNewState & LVIS_SELECTED) {
+                    OnResultListItemSelected();
+                }
+            }
+            return 0;
+        }
 
         case WM_SIZE:
             if (g_hStatusBar) {
@@ -188,35 +238,39 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
 void CreateControls(HWND hwnd) {
     HINSTANCE hInstance = (HINSTANCE)GetWindowLongPtr(hwnd, GWLP_HINSTANCE);
 
-    // Process selection group
-    CreateWindowW(L"BUTTON", L"Prozess Auswahl",
+    // =================================================================================
+    // TOP ROW: Process Selection & Scan Options & Memory Editor
+    // =================================================================================
+
+    // Process Selection Group (Links)
+    CreateWindowW(L"BUTTON", L"🔍 Prozess Auswahl",
         WS_CHILD | WS_VISIBLE | BS_GROUPBOX,
-        10, 10, 300, 200, hwnd, nullptr, hInstance, nullptr);
+        15, 15, 320, 220, hwnd, nullptr, hInstance, nullptr);
 
     g_hProcessList = CreateWindowW(WC_LISTBOXW, nullptr,
         WS_CHILD | WS_VISIBLE | WS_BORDER | WS_VSCROLL | LBS_NOTIFY,
-        20, 30, 280, 140, hwnd, (HMENU)IDC_PROCESS_LIST, hInstance, nullptr);
+        25, 40, 300, 150, hwnd, (HMENU)IDC_PROCESS_LIST, hInstance, nullptr);
 
-    CreateWindowW(L"BUTTON", L"An Prozess anhängen",
+    CreateWindowW(L"BUTTON", L"📎 An Prozess anhängen",
         WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
-        20, 175, 140, 25, hwnd, (HMENU)IDC_BTN_ATTACH, hInstance, nullptr);
+        25, 200, 145, 30, hwnd, (HMENU)IDC_BTN_ATTACH, hInstance, nullptr);
 
-    CreateWindowW(L"BUTTON", L"Aktualisieren",
+    CreateWindowW(L"BUTTON", L"🔄 Aktualisieren",
         WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
-        165, 175, 135, 25, hwnd, (HMENU)IDC_BTN_REFRESH, hInstance, nullptr);
+        180, 200, 145, 30, hwnd, (HMENU)IDC_BTN_REFRESH, hInstance, nullptr);
 
-    // Scan controls group
-    CreateWindowW(L"BUTTON", L"Scan Optionen",
+    // Scan Options Group (Mitte)
+    CreateWindowW(L"BUTTON", L"🔬 Scan Optionen",
         WS_CHILD | WS_VISIBLE | BS_GROUPBOX,
-        320, 10, 300, 200, hwnd, nullptr, hInstance, nullptr);
+        350, 15, 400, 220, hwnd, nullptr, hInstance, nullptr);
 
-    CreateWindowW(L"STATIC", L"Typ:",
+    CreateWindowW(L"STATIC", L"Datentyp:",
         WS_CHILD | WS_VISIBLE,
-        330, 35, 50, 20, hwnd, nullptr, hInstance, nullptr);
+        360, 40, 80, 20, hwnd, nullptr, hInstance, nullptr);
 
     g_hTypeCombo = CreateWindowW(WC_COMBOBOXW, nullptr,
         WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST | WS_VSCROLL,
-        385, 32, 220, 200, hwnd, (HMENU)IDC_COMBO_TYPE, hInstance, nullptr);
+        450, 37, 280, 200, hwnd, (HMENU)IDC_COMBO_TYPE, hInstance, nullptr);
 
     // Add scan type options
     SendMessageW(g_hTypeCombo, CB_ADDSTRING, 0, (LPARAM)L"4 Byte (int32)");
@@ -225,95 +279,112 @@ void CreateControls(HWND hwnd) {
     SendMessageW(g_hTypeCombo, CB_ADDSTRING, 0, (LPARAM)L"Double");
     SendMessageW(g_hTypeCombo, CB_ADDSTRING, 0, (LPARAM)L"String (ASCII)");
     SendMessageW(g_hTypeCombo, CB_ADDSTRING, 0, (LPARAM)L"String (Unicode)");
-    SendMessageW(g_hTypeCombo, CB_SETCURSEL, 0, 0); // Default to INT32
+    SendMessageW(g_hTypeCombo, CB_SETCURSEL, 0, 0);
 
-    CreateWindowW(L"STATIC", L"Wert:",
+    CreateWindowW(L"STATIC", L"Suchwert:",
         WS_CHILD | WS_VISIBLE,
-        330, 70, 50, 20, hwnd, nullptr, hInstance, nullptr);
+        360, 70, 80, 20, hwnd, nullptr, hInstance, nullptr);
 
     g_hValueInput = CreateWindowW(L"EDIT", L"",
-        WS_CHILD | WS_VISIBLE | WS_BORDER,
-        385, 67, 220, 25, hwnd, (HMENU)IDC_VALUE_INPUT, hInstance, nullptr);
+        WS_CHILD | WS_VISIBLE | WS_BORDER | ES_MULTILINE | ES_AUTOHSCROLL | ES_AUTOVSCROLL | WS_HSCROLL | WS_VSCROLL,
+        450, 67, 280, 60, hwnd, (HMENU)IDC_VALUE_INPUT, hInstance, nullptr);
+    SendMessage(g_hValueInput, EM_SETLIMITTEXT, 32768, 0);
 
-    CreateWindowW(L"BUTTON", L"Erster Scan",
+    // Scan Buttons - bessere Anordnung
+    CreateWindowW(L"BUTTON", L"🎯 Erster Scan",
         WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
-        330, 100, 135, 30, hwnd, (HMENU)IDC_BTN_FIRST_SCAN, hInstance, nullptr);
+        360, 140, 120, 35, hwnd, (HMENU)IDC_BTN_FIRST_SCAN, hInstance, nullptr);
 
-    CreateWindowW(L"BUTTON", L"Nächster Scan",
+    CreateWindowW(L"BUTTON", L"🔍 Nächster Scan",
         WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
-        470, 100, 135, 30, hwnd, (HMENU)IDC_BTN_NEXT_SCAN, hInstance, nullptr);
+        490, 140, 120, 35, hwnd, (HMENU)IDC_BTN_NEXT_SCAN, hInstance, nullptr);
 
-    CreateWindowW(L"BUTTON", L"Geändert",
+    CreateWindowW(L"BUTTON", L"📈 Geändert",
         WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
-        330, 135, 135, 30, hwnd, (HMENU)IDC_BTN_CHANGED, hInstance, nullptr);
+        620, 140, 120, 35, hwnd, (HMENU)IDC_BTN_CHANGED, hInstance, nullptr);
 
-    CreateWindowW(L"BUTTON", L"Ungeändert",
+    CreateWindowW(L"BUTTON", L"📉 Ungeändert",
         WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
-        470, 135, 135, 30, hwnd, (HMENU)IDC_BTN_UNCHANGED, hInstance, nullptr);
+        360, 180, 120, 35, hwnd, (HMENU)IDC_BTN_UNCHANGED, hInstance, nullptr);
 
-    CreateWindowW(L"BUTTON", L"Scan zurücksetzen",
+    CreateWindowW(L"BUTTON", L"🗑️ Zurücksetzen",
         WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
-        330, 170, 275, 30, hwnd, (HMENU)IDC_BTN_RESET, hInstance, nullptr);
+        490, 180, 120, 35, hwnd, (HMENU)IDC_BTN_RESET, hInstance, nullptr);
 
-    // Memory modification group
-    CreateWindowW(L"BUTTON", L"Speicher bearbeiten",
+    // Memory Editor Group (Rechts)
+    CreateWindowW(L"BUTTON", L"⚙️ Speicher Editor",
         WS_CHILD | WS_VISIBLE | BS_GROUPBOX,
-        630, 10, 340, 200, hwnd, nullptr, hInstance, nullptr);
+        770, 15, 380, 220, hwnd, nullptr, hInstance, nullptr);
 
-    CreateWindowW(L"STATIC", L"Adresse (hex):",
+    CreateWindowW(L"STATIC", L"Adresse (Hex):",
         WS_CHILD | WS_VISIBLE,
-        640, 35, 100, 20, hwnd, nullptr, hInstance, nullptr);
+        780, 40, 100, 20, hwnd, nullptr, hInstance, nullptr);
 
     g_hAddressInput = CreateWindowW(L"EDIT", L"",
-        WS_CHILD | WS_VISIBLE | WS_BORDER,
-        745, 32, 215, 25, hwnd, (HMENU)IDC_ADDRESS_INPUT, hInstance, nullptr);
+        WS_CHILD | WS_VISIBLE | WS_BORDER | ES_UPPERCASE,
+        890, 37, 250, 28, hwnd, (HMENU)IDC_ADDRESS_INPUT, hInstance, nullptr);
 
     CreateWindowW(L"STATIC", L"Neuer Wert:",
         WS_CHILD | WS_VISIBLE,
-        640, 70, 100, 20, hwnd, nullptr, hInstance, nullptr);
+        780, 75, 100, 20, hwnd, nullptr, hInstance, nullptr);
 
     g_hNewValueInput = CreateWindowW(L"EDIT", L"",
-        WS_CHILD | WS_VISIBLE | WS_BORDER,
-        745, 67, 215, 25, hwnd, (HMENU)IDC_NEW_VALUE_INPUT, hInstance, nullptr);
+        WS_CHILD | WS_VISIBLE | WS_BORDER | ES_MULTILINE | ES_AUTOHSCROLL | ES_AUTOVSCROLL | WS_HSCROLL | WS_VSCROLL,
+        890, 72, 250, 60, hwnd, (HMENU)IDC_NEW_VALUE_INPUT, hInstance, nullptr);
+    SendMessage(g_hNewValueInput, EM_SETLIMITTEXT, 32768, 0);
 
-    CreateWindowW(L"BUTTON", L"Wert schreiben",
+    CreateWindowW(L"BUTTON", L"✏️ Wert schreiben",
         WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
-        640, 100, 155, 30, hwnd, (HMENU)IDC_BTN_WRITE, hInstance, nullptr);
+        780, 145, 170, 35, hwnd, (HMENU)IDC_BTN_WRITE, hInstance, nullptr);
 
-    CreateWindowW(L"BUTTON", L"Wert lesen",
+    CreateWindowW(L"BUTTON", L"👁️ Wert lesen",
         WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
-        805, 100, 155, 30, hwnd, (HMENU)IDC_BTN_READ, hInstance, nullptr);
+        960, 145, 170, 35, hwnd, (HMENU)IDC_BTN_READ, hInstance, nullptr);
 
-    // Result list
-    CreateWindowW(L"STATIC", L"Gefundene Adressen:",
+    // =================================================================================
+    // MAIN CONTENT: Results List
+    // =================================================================================
+
+    CreateWindowW(L"STATIC", L"📋 Gefundene Adressen & Werte:",
         WS_CHILD | WS_VISIBLE,
-        10, 220, 150, 20, hwnd, nullptr, hInstance, nullptr);
+        15, 250, 200, 25, hwnd, nullptr, hInstance, nullptr);
 
-    g_hResultList = CreateWindowExW(0, WC_LISTVIEWW, nullptr,
-        WS_CHILD | WS_VISIBLE | WS_BORDER | LVS_REPORT | LVS_SINGLESEL | LVS_EDITLABELS,
-        10, 245, 960, 360, hwnd, (HMENU)IDC_RESULT_LIST, hInstance, nullptr);
+    g_hResultList = CreateWindowExW(WS_EX_CLIENTEDGE, WC_LISTVIEWW, nullptr,
+        WS_CHILD | WS_VISIBLE | LVS_REPORT | LVS_SINGLESEL | LVS_SHOWSELALWAYS,
+        15, 275, 1350, 420, hwnd, (HMENU)IDC_RESULT_LIST, hInstance, nullptr);
 
-    // Set up list view columns
+    // Enhanced list view columns
     LVCOLUMNW lvc = {};
-    lvc.mask = LVCF_TEXT | LVCF_WIDTH;
+    lvc.mask = LVCF_TEXT | LVCF_WIDTH | LVCF_FMT;
+    lvc.fmt = LVCFMT_LEFT;
 
-    lvc.cx = 150;
-    lvc.pszText = (LPWSTR)L"Adresse";
+    lvc.cx = 250;
+    lvc.pszText = (LPWSTR)L"📍 Speicheradresse";
     ListView_InsertColumn(g_hResultList, 0, &lvc);
 
-    lvc.cx = 150;
-    lvc.pszText = (LPWSTR)L"Wert";
+    lvc.cx = 400;
+    lvc.pszText = (LPWSTR)L"💾 Aktueller Wert";
     ListView_InsertColumn(g_hResultList, 1, &lvc);
 
-    // Status bar
+    lvc.cx = 150;
+    lvc.pszText = (LPWSTR)L"📊 Datentyp";
+    ListView_InsertColumn(g_hResultList, 2, &lvc);
+
+    // Enable full row selection and grid lines
+    ListView_SetExtendedListViewStyle(g_hResultList,
+        LVS_EX_FULLROWSELECT | LVS_EX_GRIDLINES | LVS_EX_INFOTIP);
+
+    // =================================================================================
+    // BOTTOM: Status & Process Info
+    // =================================================================================
+
+    g_hProcessLabel = CreateWindowW(L"STATIC", L"🎯 Ausgewählter Prozess: Keiner",
+        WS_CHILD | WS_VISIBLE,
+        15, 710, 600, 30, hwnd, nullptr, hInstance, nullptr);
+
     g_hStatusBar = CreateWindowExW(0, STATUSCLASSNAMEW, nullptr,
         WS_CHILD | WS_VISIBLE | SBARS_SIZEGRIP,
         0, 0, 0, 0, hwnd, (HMENU)IDC_STATUS_BAR, hInstance, nullptr);
-
-    // Current process label
-    g_hProcessLabel = CreateWindowW(L"STATIC", L"Ausgewählter Prozess: ",
-        WS_CHILD | WS_VISIBLE,
-        10, 620, 300, 25, hwnd, nullptr, hInstance, nullptr);
 }
 
 void PopulateProcessList() {
@@ -380,15 +451,17 @@ void PerformFirstScan() {
         return;
     }
 
-    wchar_t buffer[256];
-    GetWindowTextW(g_hValueInput, buffer, 256);
+    // Dynamische Allokierung für große Eingaben
+    int valueLength = GetWindowTextLengthW(g_hValueInput);
+    std::vector<wchar_t> buffer(valueLength + 1);
+    GetWindowTextW(g_hValueInput, buffer.data(), valueLength + 1);
 
     // Get selected scan type
     int typeIndex = (int)SendMessage(g_hTypeCombo, CB_GETCURSEL, 0, 0);
     g_currentScanType = static_cast<ScanValueType>(typeIndex);
 
     // Check if input is empty
-    bool isEmptyInput = (wcslen(buffer) == 0);
+    bool isEmptyInput = (valueLength == 0);
 
     UpdateStatusBar(L"Scanne Speicher... Bitte warten...");
     UpdateWindow(g_hMainWindow);
@@ -403,15 +476,13 @@ void PerformFirstScan() {
             if (isEmptyInput) {
                 g_currentMatches = g_pScanner->scanAllValues<int32_t>();
             } else {
-                int32_t value = _wtoi(buffer);
+                int32_t value = _wtoi(buffer.data());
                 g_currentMatches = g_pScanner->scanForValue(value);
             }
             break;
 
         case ScanValueType::INT64:
             if (isEmptyInput) {
-                // For int64, we need to store in currentMatches as int32 for display purposes
-                // or create a separate int64 vector
                 auto matches = g_pScanner->scanAllValues<int64_t>();
                 for (const auto& m : matches) {
                     MemoryMatch<int32_t> converted;
@@ -420,7 +491,7 @@ void PerformFirstScan() {
                     g_currentMatches.push_back(converted);
                 }
             } else {
-                int64_t value = _wtoi64(buffer);
+                int64_t value = _wtoi64(buffer.data());
                 auto matches = g_pScanner->scanForValue(value);
                 for (const auto& m : matches) {
                     MemoryMatch<int32_t> converted;
@@ -433,7 +504,7 @@ void PerformFirstScan() {
 
         case ScanValueType::FLOAT:
             if (!isEmptyInput) {
-                float value = std::stof(buffer);
+                float value = std::stof(buffer.data());
                 auto matches = g_pScanner->scanForValue(value);
                 for (const auto& m : matches) {
                     MemoryMatch<int32_t> converted;
@@ -446,7 +517,7 @@ void PerformFirstScan() {
 
         case ScanValueType::DOUBLE:
             if (!isEmptyInput) {
-                double value = std::stod(buffer);
+                double value = std::stod(buffer.data());
                 auto matches = g_pScanner->scanForValue(value);
                 for (const auto& m : matches) {
                     MemoryMatch<int32_t> converted;
@@ -460,16 +531,16 @@ void PerformFirstScan() {
         case ScanValueType::STRING_ASCII:
             if (!isEmptyInput) {
                 // Convert wchar_t to ASCII string
-                char asciiBuffer[256];
-                wcstombs(asciiBuffer, buffer, 256);
-                std::string searchStr(asciiBuffer);
+                std::vector<char> asciiBuffer(valueLength + 1);
+                wcstombs(asciiBuffer.data(), buffer.data(), valueLength + 1);
+                std::string searchStr(asciiBuffer.data());
                 g_stringMatches = g_pScanner->scanForString(searchStr);
             }
             break;
 
         case ScanValueType::STRING_UNICODE:
             if (!isEmptyInput) {
-                std::wstring searchStr(buffer);
+                std::wstring searchStr(buffer.data());
                 g_wstringMatches = g_pScanner->scanForWideString(searchStr);
             }
             break;
@@ -499,8 +570,10 @@ void PerformNextScan() {
         return;
     }
 
-    wchar_t buffer[256];
-    GetWindowTextW(g_hValueInput, buffer, 256);
+    // Dynamische Allokierung für große Eingaben
+    int valueLength = GetWindowTextLengthW(g_hValueInput);
+    std::vector<wchar_t> buffer(valueLength + 1);
+    GetWindowTextW(g_hValueInput, buffer.data(), valueLength + 1);
 
     UpdateStatusBar(L"Filtere Ergebnisse...");
     UpdateWindow(g_hMainWindow);
@@ -508,7 +581,7 @@ void PerformNextScan() {
     // Filter based on current scan type
     switch (g_currentScanType) {
         case ScanValueType::INT32: {
-            int32_t value = _wtoi(buffer);
+            int32_t value = _wtoi(buffer.data());
             // Use the proper filter that updates the values
             std::vector<MemoryMatch<int32_t>> newMatches;
             for (const auto& match : g_currentMatches) {
@@ -524,7 +597,7 @@ void PerformNextScan() {
             break;
         }
         case ScanValueType::INT64: {
-            int64_t value = _wtoi64(buffer);
+            int64_t value = _wtoi64(buffer.data());
             std::vector<MemoryMatch<int32_t>> newMatches;
             for (const auto& match : g_currentMatches) {
                 int64_t currentValue;
@@ -539,7 +612,7 @@ void PerformNextScan() {
             break;
         }
         case ScanValueType::FLOAT: {
-            float value = std::stof(buffer);
+            float value = std::stof(buffer.data());
             std::vector<MemoryMatch<int32_t>> newMatches;
             for (const auto& match : g_currentMatches) {
                 float currentValue;
@@ -554,7 +627,7 @@ void PerformNextScan() {
             break;
         }
         case ScanValueType::DOUBLE: {
-            double value = std::stod(buffer);
+            double value = std::stod(buffer.data());
             std::vector<MemoryMatch<int32_t>> newMatches;
             for (const auto& match : g_currentMatches) {
                 double currentValue;
@@ -569,9 +642,9 @@ void PerformNextScan() {
             break;
         }
         case ScanValueType::STRING_ASCII: {
-            char asciiBuffer[256];
-            wcstombs(asciiBuffer, buffer, 256);
-            std::string searchStr(asciiBuffer);
+            std::vector<char> asciiBuffer(valueLength + 1);
+            wcstombs(asciiBuffer.data(), buffer.data(), valueLength + 1);
+            std::string searchStr(asciiBuffer.data());
 
             // Filter string matches manually
             std::vector<MemoryMatch<std::string>> newMatches;
@@ -591,7 +664,7 @@ void PerformNextScan() {
             break;
         }
         case ScanValueType::STRING_UNICODE: {
-            std::wstring searchStr(buffer);
+            std::wstring searchStr(buffer.data());
 
             // Filter wstring matches manually
             std::vector<MemoryMatch<std::wstring>> newMatches;
@@ -761,7 +834,7 @@ void UpdateResultList() {
 
     // Calculate total matches across all types
     size_t totalMatches = g_currentMatches.size() + g_stringMatches.size() + g_wstringMatches.size();
-    size_t maxDisplay = std::min<size_t>(totalMatches, 1000);
+    size_t maxDisplay = std::min<size_t>(totalMatches, 2000); // Erhöht auf 2000 für bessere Performance
 
     // Reserve space for better performance
     g_displayedAddresses.reserve(maxDisplay);
@@ -770,44 +843,94 @@ void UpdateResultList() {
     // Add int32 matches
     for (size_t i = 0; i < g_currentMatches.size() && g_displayedAddresses.size() < maxDisplay; i++) {
         std::wstringstream ss;
-        ss << L"0x" << std::hex << std::setw(16) << std::setfill(L'0') << g_currentMatches[i].address;
+        ss << L"0x" << std::hex << std::uppercase << std::setw(16) << std::setfill(L'0') << g_currentMatches[i].address;
+
+        // Add to ListView
+        LVITEMW lvi = {};
+        lvi.mask = LVIF_TEXT;
+        lvi.iItem = (int)g_displayedAddresses.size();
+        lvi.pszText = const_cast<LPWSTR>(ss.str().c_str());
+        ListView_InsertItem(g_hResultList, &lvi);
+
+        // Wert
+        std::wstring valueStr = std::to_wstring(g_currentMatches[i].value);
+        ListView_SetItemText(g_hResultList, (int)g_displayedAddresses.size(), 1, const_cast<LPWSTR>(valueStr.c_str()));
+
+        // Datentyp
+        std::wstring typeStr;
+        switch (g_currentScanType) {
+            case ScanValueType::INT32: typeStr = L"INT32"; break;
+            case ScanValueType::INT64: typeStr = L"INT64"; break;
+            case ScanValueType::FLOAT: typeStr = L"FLOAT"; break;
+            case ScanValueType::DOUBLE: typeStr = L"DOUBLE"; break;
+            default: typeStr = L"NUMERIC"; break;
+        }
+        ListView_SetItemText(g_hResultList, (int)g_displayedAddresses.size(), 2, const_cast<LPWSTR>(typeStr.c_str()));
+
         g_displayedAddresses.push_back(ss.str());
-        g_displayedValues.push_back(std::to_wstring(g_currentMatches[i].value));
+        g_displayedValues.push_back(valueStr);
     }
 
     // Add ASCII string matches
     for (size_t i = 0; i < g_stringMatches.size() && g_displayedAddresses.size() < maxDisplay; i++) {
         std::wstringstream ss;
-        ss << L"0x" << std::hex << std::setw(16) << std::setfill(L'0') << g_stringMatches[i].address;
-        g_displayedAddresses.push_back(ss.str());
+        ss << L"0x" << std::hex << std::uppercase << std::setw(16) << std::setfill(L'0') << g_stringMatches[i].address;
+
+        // Add to ListView
+        LVITEMW lvi = {};
+        lvi.mask = LVIF_TEXT;
+        lvi.iItem = (int)g_displayedAddresses.size();
+        lvi.pszText = const_cast<LPWSTR>(ss.str().c_str());
+        ListView_InsertItem(g_hResultList, &lvi);
 
         // Convert ASCII string to wstring for display
         std::wstring wstr(g_stringMatches[i].value.begin(), g_stringMatches[i].value.end());
+        // Truncate long strings for display
+        if (wstr.length() > 100) {
+            wstr = wstr.substr(0, 97) + L"...";
+        }
+        ListView_SetItemText(g_hResultList, (int)g_displayedAddresses.size(), 1, const_cast<LPWSTR>(wstr.c_str()));
+
+        // Datentyp
+        ListView_SetItemText(g_hResultList, (int)g_displayedAddresses.size(), 2, L"ASCII");
+
+        g_displayedAddresses.push_back(ss.str());
         g_displayedValues.push_back(wstr);
     }
 
     // Add Unicode string matches
     for (size_t i = 0; i < g_wstringMatches.size() && g_displayedAddresses.size() < maxDisplay; i++) {
         std::wstringstream ss;
-        ss << L"0x" << std::hex << std::setw(16) << std::setfill(L'0') << g_wstringMatches[i].address;
-        g_displayedAddresses.push_back(ss.str());
-        g_displayedValues.push_back(g_wstringMatches[i].value);
-    }
+        ss << L"0x" << std::hex << std::uppercase << std::setw(16) << std::setfill(L'0') << g_wstringMatches[i].address;
 
-    // Display in ListView
-    for (size_t i = 0; i < g_displayedAddresses.size(); i++) {
+        // Add to ListView
         LVITEMW lvi = {};
         lvi.mask = LVIF_TEXT;
-        lvi.iItem = (int)i;
-        lvi.pszText = const_cast<LPWSTR>(g_displayedAddresses[i].c_str());
+        lvi.iItem = (int)g_displayedAddresses.size();
+        lvi.pszText = const_cast<LPWSTR>(ss.str().c_str());
         ListView_InsertItem(g_hResultList, &lvi);
 
-        ListView_SetItemText(g_hResultList, (int)i, 1, const_cast<LPWSTR>(g_displayedValues[i].c_str()));
+        // Truncate long strings for display
+        std::wstring displayValue = g_wstringMatches[i].value;
+        if (displayValue.length() > 100) {
+            displayValue = displayValue.substr(0, 97) + L"...";
+        }
+        ListView_SetItemText(g_hResultList, (int)g_displayedAddresses.size(), 1, const_cast<LPWSTR>(displayValue.c_str()));
+
+        // Datentyp
+        ListView_SetItemText(g_hResultList, (int)g_displayedAddresses.size(), 2, L"UNICODE");
+
+        g_displayedAddresses.push_back(ss.str());
+        g_displayedValues.push_back(displayValue);
     }
 
     if (totalMatches > maxDisplay) {
-        UpdateStatusBar(L"Zeige " + std::to_wstring(maxDisplay) + L" von " +
+        UpdateStatusBar(L"📊 Zeige " + std::to_wstring(maxDisplay) + L" von " +
                        std::to_wstring(totalMatches) + L" Treffern");
+    } else if (totalMatches > 0) {
+        UpdateStatusBar(L"📊 " + std::to_wstring(totalMatches) + L" Treffer gefunden");
+    } else {
+        UpdateStatusBar(L"❌ Keine Treffer gefunden");
     }
 }
 
@@ -818,12 +941,19 @@ void WriteValue() {
     }
 
     wchar_t addrBuffer[32];
-    wchar_t valueBuffer[256];
-
     GetWindowTextW(g_hAddressInput, addrBuffer, 32);
-    GetWindowTextW(g_hNewValueInput, valueBuffer, 256);
 
-    if (wcslen(addrBuffer) == 0 || wcslen(valueBuffer) == 0) {
+    // Dynamische Allokierung für große Eingaben
+    int valueLength = GetWindowTextLengthW(g_hNewValueInput);
+    if (valueLength == 0) {
+        MessageBoxW(g_hMainWindow, L"Bitte geben Sie Adresse und Wert ein!", L"Fehler", MB_OK | MB_ICONWARNING);
+        return;
+    }
+
+    std::vector<wchar_t> valueBuffer(valueLength + 1);
+    GetWindowTextW(g_hNewValueInput, valueBuffer.data(), valueLength + 1);
+
+    if (wcslen(addrBuffer) == 0) {
         MessageBoxW(g_hMainWindow, L"Bitte geben Sie Adresse und Wert ein!", L"Fehler", MB_OK | MB_ICONWARNING);
         return;
     }
@@ -834,35 +964,35 @@ void WriteValue() {
     // Write based on current scan type
     switch (g_currentScanType) {
         case ScanValueType::INT32: {
-            int32_t value = _wtoi(valueBuffer);
+            int32_t value = _wtoi(valueBuffer.data());
             success = g_pScanner->writeValue(address, value);
             break;
         }
         case ScanValueType::INT64: {
-            int64_t value = _wtoi64(valueBuffer);
+            int64_t value = _wtoi64(valueBuffer.data());
             success = g_pScanner->writeValue(address, value);
             break;
         }
         case ScanValueType::FLOAT: {
-            float value = std::stof(valueBuffer);
+            float value = std::stof(valueBuffer.data());
             success = g_pScanner->writeValue(address, value);
             break;
         }
         case ScanValueType::DOUBLE: {
-            double value = std::stod(valueBuffer);
+            double value = std::stod(valueBuffer.data());
             success = g_pScanner->writeValue(address, value);
             break;
         }
         case ScanValueType::STRING_ASCII: {
             // Convert wchar_t to ASCII string
-            char asciiBuffer[256];
-            wcstombs(asciiBuffer, valueBuffer, 256);
-            std::string str(asciiBuffer);
+            std::vector<char> asciiBuffer(valueLength + 1);
+            wcstombs(asciiBuffer.data(), valueBuffer.data(), valueLength + 1);
+            std::string str(asciiBuffer.data());
             success = g_pScanner->writeMemory(address, str.c_str(), str.length());
             break;
         }
         case ScanValueType::STRING_UNICODE: {
-            std::wstring str(valueBuffer);
+            std::wstring str(valueBuffer.data());
             success = g_pScanner->writeMemory(address, str.c_str(), str.length() * sizeof(wchar_t));
             break;
         }
@@ -935,10 +1065,10 @@ void ReadValue() {
             break;
         }
         case ScanValueType::STRING_ASCII: {
-            // Read up to 256 bytes as ASCII string
-            char buffer[256] = {0};
-            if (g_pScanner->readMemory(address, buffer, 255)) {
-                std::string str(buffer);
+            // Read up to 8KB as ASCII string
+            std::vector<char> buffer(8192, 0);
+            if (g_pScanner->readMemory(address, buffer.data(), buffer.size() - 1)) {
+                std::string str(buffer.data());
                 std::wstring wstr(str.begin(), str.end());
                 ss << wstr;
                 SetWindowTextW(g_hNewValueInput, wstr.c_str());
@@ -947,10 +1077,10 @@ void ReadValue() {
             break;
         }
         case ScanValueType::STRING_UNICODE: {
-            // Read up to 128 wchars as Unicode string
-            wchar_t buffer[128] = {0};
-            if (g_pScanner->readMemory(address, buffer, 127 * sizeof(wchar_t))) {
-                std::wstring str(buffer);
+            // Read up to 4KB wchars as Unicode string
+            std::vector<wchar_t> buffer(4096, 0);
+            if (g_pScanner->readMemory(address, buffer.data(), (buffer.size() - 1) * sizeof(wchar_t))) {
+                std::wstring str(buffer.data());
                 ss << str;
                 SetWindowTextW(g_hNewValueInput, str.c_str());
                 success = true;
@@ -983,6 +1113,68 @@ void UpdateStatusBar(const std::wstring& text) {
     }
 }
 
+void UpdateInputLimitForAddress(uintptr_t address) {
+    // Keine Limitierung mehr - die Felder haben bereits ein großzügiges Limit von 32KB
+    // Diese Funktion wird beibehalten für zukünftige Erweiterungen, tut aber nichts mehr
+
+    if (!g_pScanner) {
+        return;
+    }
+
+    // Get the size of the memory region at this address for info purposes
+    size_t regionSize = g_pScanner->getRegionSizeAtAddress(address);
+
+    if (regionSize > 0) {
+        // Update status bar with info (optional)
+        std::wstringstream ss;
+        ss << L"Verfügbarer Speicher an Adresse: " << regionSize << L" Bytes";
+        UpdateStatusBar(ss.str());
+    }
+}
+
+void OnAddressInputChanged() {
+    wchar_t addrBuffer[32];
+    GetWindowTextW(g_hAddressInput, addrBuffer, 32);
+
+    if (wcslen(addrBuffer) > 0) {
+        try {
+            uintptr_t address = std::stoull(addrBuffer, nullptr, 16);
+            UpdateInputLimitForAddress(address);
+        } catch (...) {
+            // Invalid address format - ignore
+        }
+    }
+}
+
+void OnResultListItemSelected() {
+    int selectedIndex = ListView_GetNextItem(g_hResultList, -1, LVNI_SELECTED);
+
+    if (selectedIndex == -1) {
+        return; // No item selected
+    }
+
+    // Get address text from the selected item
+    wchar_t addressText[32] = {0};
+    ListView_GetItemText(g_hResultList, selectedIndex, 0, addressText, 32);
+
+    // Set the address in the address input field
+    SetWindowTextW(g_hAddressInput, addressText);
+
+    // Parse the address and update input limit
+    if (wcslen(addressText) > 0) {
+        try {
+            uintptr_t address = std::stoull(addressText, nullptr, 16);
+            UpdateInputLimitForAddress(address);
+
+            // Also get the current value and display it
+            wchar_t valueText[256] = {0};
+            ListView_GetItemText(g_hResultList, selectedIndex, 1, valueText, 256);
+            SetWindowTextW(g_hNewValueInput, valueText);
+        } catch (...) {
+            // Invalid address
+        }
+    }
+}
 #else
 #include <iostream>
 int main() {

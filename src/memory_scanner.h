@@ -32,6 +32,9 @@ public:
     // Get all readable memory regions
     std::vector<MemoryRegion> getReadableRegions();
 
+    // Get the size of the memory region at a specific address
+    size_t getRegionSizeAtAddress(uintptr_t address);
+
     // Initial scan: find all addresses matching a specific value
     template<typename T>
     std::vector<MemoryMatch<T>> scanForValue(T value);
