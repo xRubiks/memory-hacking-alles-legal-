@@ -2,7 +2,52 @@
 #include "memory_scanner.h"
 #include <algorithm>
 
-MemoryScanner::MemoryScanner(HANDLE processHandle) : m_processHandle(processHandle) {}
+#include <windows.h>
+#include <tchar.h>
+#include <stdio.h>
+#include <psapi.h>
+
+std::vector<Module> fetchModules( HANDLE hProcess )
+{
+    HMODULE hMods[1024];
+    DWORD cbNeeded;
+    unsigned int i;
+    MODULEINFO modinfo;
+
+    std::vector<Module> modules;
+
+    if( EnumProcessModules(hProcess, hMods, sizeof(hMods), &cbNeeded))
+    {
+        for ( i = 0; i < (cbNeeded / sizeof(HMODULE)); i++ )
+        {
+            TCHAR szModName[MAX_PATH];
+
+            // Get the full path to the module's file.
+
+            if ( GetModuleFileNameEx( hProcess, hMods[i], szModName,
+                                      sizeof(szModName) / sizeof(TCHAR)))
+            {
+                GetModuleInformation(hProcess, hMods[i], &modinfo, sizeof(MODULEINFO));
+
+                auto name = std::string(szModName);
+
+                modules.push_back(Module {
+                    .name = std::string( name.substr(name.find_last_of("/\\") + 1) ),
+                    .baseAddress = reinterpret_cast<uintptr_t>(modinfo.EntryPoint),
+                    .size = modinfo.SizeOfImage,
+                });
+            }
+        }
+    }
+
+    std::ranges::sort(modules, [](const Module& a, const Module& b) {
+        return a.baseAddress < b.baseAddress;
+    });
+
+    return modules;
+}
+
+MemoryScanner::MemoryScanner(HANDLE processHandle) : m_processHandle(processHandle), m_modules(fetchModules(m_processHandle)) {}
 
 MemoryScanner::~MemoryScanner() {}
 
@@ -31,6 +76,15 @@ std::vector<MemoryRegion> MemoryScanner::getReadableRegions() {
     }
 
     return regions;
+}
+
+
+Module* MemoryScanner::getModuleByAddress(uintptr_t address) {
+    for (int i = 0; i < m_modules.size(); i++) {
+        if (m_modules[i].baseAddress <= address && address <= m_modules[i].baseAddress + m_modules[i].size)
+            return &m_modules[i-1];
+    }
+    return &m_modules[0];
 }
 
 size_t MemoryScanner::getRegionSizeAtAddress(uintptr_t address) {

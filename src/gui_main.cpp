@@ -29,7 +29,8 @@
 #define IDC_BTN_RESET 1014
 #define IDC_COMBO_TYPE 1015
 #define IDC_BTN_REFRESH 1016
-#define IDC_PROCESS_LABEL 1017
+#define IDC_BTN_MODULES 1017
+#define IDC_PROCESS_LABEL 1018
 
 // Scan value types
 enum class ScanValueType {
@@ -62,6 +63,7 @@ std::vector<std::wstring> g_displayedValues;
 std::wstring g_currentProcessName = L"";
 ScanValueType g_currentScanType = ScanValueType::INT32;
 bool g_hasInitialScan = false;
+HINSTANCE _hInstance;
 
 // Function declarations
 LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
@@ -87,6 +89,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     icex.dwSize = sizeof(INITCOMMONCONTROLSEX);
     icex.dwICC = ICC_LISTVIEW_CLASSES | ICC_BAR_CLASSES;
     InitCommonControlsEx(&icex);
+
+    _hInstance = hInstance;
 
     // Register window class
     const wchar_t CLASS_NAME[] = L"MemoryScannerWindow";
@@ -132,6 +136,37 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     if (g_hProcess) CloseHandle(g_hProcess);
 
     return 0;
+}
+
+void OpenModuleList() {
+    auto g_hMainWindow = CreateWindowExW(
+        0,
+        L"Modules",
+        L"Memory Scanner - Professional",
+        WS_OVERLAPPEDWINDOW,
+        CW_USEDEFAULT, CW_USEDEFAULT, 1200, 550,
+        nullptr,
+        nullptr,
+        _hInstance,
+        nullptr
+    );
+
+    ShowWindow(g_hMainWindow, 1);
+    UpdateWindow(g_hMainWindow);
+
+    // Enhanced list view columns
+    LVCOLUMNW lvc = {};
+    lvc.mask = LVCF_TEXT | LVCF_WIDTH | LVCF_FMT;
+    lvc.fmt = LVCFMT_LEFT;
+
+    lvc.cx = 250;
+    lvc.pszText = (LPWSTR)L"📍 Speicheradresse";
+    ListView_InsertColumn(g_hMainWindow, 0, &lvc);
+
+    lvc.cx = 400;
+    lvc.pszText = (LPWSTR)L"💾 Aktueller Wert";
+    ListView_InsertColumn(g_hMainWindow, 1, &lvc);
+
 }
 
 LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
@@ -195,6 +230,9 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                 case IDC_BTN_REFRESH:
                     PopulateProcessList();
                     break;
+                case IDC_BTN_MODULES:
+                    OpenModuleList();
+                    break;
                 case IDC_ADDRESS_INPUT:
                     if (HIWORD(wParam) == EN_CHANGE) {
                         OnAddressInputChanged();
@@ -253,16 +291,20 @@ void CreateControls(HWND hwnd) {
 
     CreateWindowW(L"BUTTON", L"📎 An Prozess anhängen",
         WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
-        25, 200, 145, 30, hwnd, (HMENU)IDC_BTN_ATTACH, hInstance, nullptr);
+        25, 200, 90, 30, hwnd, (HMENU)IDC_BTN_ATTACH, hInstance, nullptr);
 
     CreateWindowW(L"BUTTON", L"🔄 Aktualisieren",
         WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
-        180, 200, 145, 30, hwnd, (HMENU)IDC_BTN_REFRESH, hInstance, nullptr);
+        125, 200, 90, 30, hwnd, (HMENU)IDC_BTN_REFRESH, hInstance, nullptr);
+
+    CreateWindowW(L"BUTTON", L"Modules",
+        WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
+        225, 200, 90, 30, hwnd, (HMENU)IDC_BTN_MODULES, hInstance, nullptr);
 
     // Scan Options Group (Mitte)
     CreateWindowW(L"BUTTON", L"🔬 Scan Optionen",
         WS_CHILD | WS_VISIBLE | BS_GROUPBOX,
-        350, 15, 400, 220, hwnd, nullptr, hInstance, nullptr);
+        325, 15, 400, 220, hwnd, nullptr, hInstance, nullptr);
 
     CreateWindowW(L"STATIC", L"Datentyp:",
         WS_CHILD | WS_VISIBLE,
@@ -369,6 +411,10 @@ void CreateControls(HWND hwnd) {
     lvc.cx = 150;
     lvc.pszText = (LPWSTR)L"📊 Datentyp";
     ListView_InsertColumn(g_hResultList, 2, &lvc);
+
+    lvc.cx = 150;
+    lvc.pszText = (LPWSTR)L"📊 Module";
+    ListView_InsertColumn(g_hResultList, 3, &lvc);
 
     // Enable full row selection and grid lines
     ListView_SetExtendedListViewStyle(g_hResultList,
@@ -867,6 +913,10 @@ void UpdateResultList() {
         }
         ListView_SetItemText(g_hResultList, (int)g_displayedAddresses.size(), 2, const_cast<LPWSTR>(typeStr.c_str()));
 
+        auto name = g_pScanner->getModuleByAddress(g_currentMatches[i].address)->name;
+        std::wstring wname = std::wstring(name.begin(), name.end());
+        ListView_SetItemText(g_hResultList, (int)g_displayedAddresses.size(), 3, const_cast<LPWSTR>(wname.c_str()));
+
         g_displayedAddresses.push_back(ss.str());
         g_displayedValues.push_back(valueStr);
     }
@@ -894,6 +944,10 @@ void UpdateResultList() {
         // Datentyp
         ListView_SetItemText(g_hResultList, (int)g_displayedAddresses.size(), 2, L"ASCII");
 
+        auto name = g_pScanner->getModuleByAddress(g_currentMatches[i].address)->name;
+        std::wstring wname = std::wstring(name.begin(), name.end());
+        ListView_SetItemText(g_hResultList, (int)g_displayedAddresses.size(), 3, const_cast<LPWSTR>(wname.c_str()));
+
         g_displayedAddresses.push_back(ss.str());
         g_displayedValues.push_back(wstr);
     }
@@ -919,6 +973,10 @@ void UpdateResultList() {
 
         // Datentyp
         ListView_SetItemText(g_hResultList, (int)g_displayedAddresses.size(), 2, L"UNICODE");
+
+        auto name = g_pScanner->getModuleByAddress(g_currentMatches[i].address)->name;
+        std::wstring wname = std::wstring(name.begin(), name.end());
+        ListView_SetItemText(g_hResultList, (int)g_displayedAddresses.size(), 3, const_cast<LPWSTR>(wname.c_str()));
 
         g_displayedAddresses.push_back(ss.str());
         g_displayedValues.push_back(displayValue);

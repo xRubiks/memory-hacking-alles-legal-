@@ -23,6 +23,12 @@ struct MemoryMatch {
     T value;
 };
 
+struct Module {
+    std::string name;
+    uintptr_t baseAddress;
+    size_t size;
+};
+
 // Memory Scanner class
 class MemoryScanner {
 public:
@@ -34,6 +40,10 @@ public:
 
     // Get the size of the memory region at a specific address
     size_t getRegionSizeAtAddress(uintptr_t address);
+
+
+    // Get the size of the memory region at a specific address
+    Module* getModuleByAddress(uintptr_t address);
 
     // Initial scan: find all addresses matching a specific value
     template<typename T>
@@ -75,6 +85,7 @@ public:
 
 private:
     HANDLE m_processHandle;
+    std::vector<Module> m_modules;
 
     bool isReadableRegion(const MemoryRegion& region);
 };
