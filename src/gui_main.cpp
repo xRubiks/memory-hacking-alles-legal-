@@ -549,7 +549,9 @@ void PerformFirstScan() {
             break;
 
         case ScanValueType::FLOAT:
-            if (!isEmptyInput) {
+            if (isEmptyInput) {
+                g_currentMatches = g_pScanner->scanAllValues<int32_t>();
+            } else {
                 float value = std::stof(buffer.data());
                 auto matches = g_pScanner->scanForValue(value);
                 for (const auto& m : matches) {
@@ -562,7 +564,9 @@ void PerformFirstScan() {
             break;
 
         case ScanValueType::DOUBLE:
-            if (!isEmptyInput) {
+            if (isEmptyInput) {
+                g_currentMatches = g_pScanner->scanAllValues<int32_t>();
+            } else {
                 double value = std::stod(buffer.data());
                 auto matches = g_pScanner->scanForValue(value);
                 for (const auto& m : matches) {
@@ -944,7 +948,7 @@ void UpdateResultList() {
         // Datentyp
         ListView_SetItemText(g_hResultList, (int)g_displayedAddresses.size(), 2, L"ASCII");
 
-        auto name = g_pScanner->getModuleByAddress(g_currentMatches[i].address)->name;
+        auto name = g_pScanner->getModuleByAddress(g_stringMatches[i].address)->name;
         std::wstring wname = std::wstring(name.begin(), name.end());
         ListView_SetItemText(g_hResultList, (int)g_displayedAddresses.size(), 3, const_cast<LPWSTR>(wname.c_str()));
 
@@ -974,7 +978,7 @@ void UpdateResultList() {
         // Datentyp
         ListView_SetItemText(g_hResultList, (int)g_displayedAddresses.size(), 2, L"UNICODE");
 
-        auto name = g_pScanner->getModuleByAddress(g_currentMatches[i].address)->name;
+        auto name = g_pScanner->getModuleByAddress(g_wstringMatches[i].address)->name;
         std::wstring wname = std::wstring(name.begin(), name.end());
         ListView_SetItemText(g_hResultList, (int)g_displayedAddresses.size(), 3, const_cast<LPWSTR>(wname.c_str()));
 
